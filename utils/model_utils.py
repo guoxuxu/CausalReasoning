@@ -78,8 +78,9 @@ def parse_args():
     parser.add_argument(
         "--prompting_method",
         type=str,
-        default="zero_shot_cot",
-        help="Prompting method, e.g., zero_shot_cot / few_shot_cot ...",
+        default="zero_shot",
+        choices=("zero_shot", "zero_shot_cot", "zero_shot_insert_explanations", "zero_shot_causal", "zero_shot_causal_refined", "zero_shot_causal_cot", "zero_shot_causal_refined_cot"),
+        help="Prompting method used to generate data / CoT.",
     )
     parser.add_argument("--mode", type=str, default="answer", choices=("answer", "step"))
     parser.add_argument("--metric", type=str, default="Sentropy", choices=("Xentropy", "Sentropy", "ppl"))
