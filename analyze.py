@@ -27,25 +27,32 @@ if __name__ == "__main__":
     valid_types = [
         'from effect to cause without intervention',
         'from effect to cause with intervention',
+        'from cause to effect without intervention',
         'from cause to effect with intervention',
-        'from cause to effect without intervention'
     ]
     
     correct_by_method = {m: 0 for m in evaluation_methods}
     correct_by_method_qtyep = {m: {t: 0 for t in valid_types} for m in evaluation_methods}
+    pass_1_correct_by_method = {m: 0 for m in evaluation_methods}
     
     problem_files = [p for p in problem_load_path.iterdir() if p.suffix == ".json"]
     for problem_file in tqdm(problem_files, desc="Evaluating"):
         with open(problem_file, "r", encoding="utf-8") as f:
             results = json.load(f)
         ex_id = results.get("ID")
+        ground_truth = results["Ground Truth"].lower().strip()
+        question_type = results.get("Question Type")
         
         for method in evaluation_methods:
             is_acc = results.get(f"{method}_is_acc")
-            question_type = results.get("Question Type")
             if is_acc:
                 correct_by_method[method] += 1
                 correct_by_method_qtyep[method][question_type] += 1
+        for method in evaluation_methods:
+            pass_1_ans = results.get(f"{method}_answers")[0].lower().strip()
+            is_acc = (pass_1_ans is not None) and (pass_1_ans == ground_truth)
+            if is_acc:
+                pass_1_correct_by_method[method] += 1
         
         if results["zs_Explanation_is_acc"] == True and results["zs_causal_is_acc"] == False and results["zs_causal_Inte_is_acc"] == False:
             inpsection_ids_1.append(ex_id)
@@ -59,8 +66,10 @@ if __name__ == "__main__":
     
     N = len(problem_files)
     logging.info(f"Number of Problems: {N}")
+    for m, c in pass_1_correct_by_method.items():
+        logging.info(f"{m} Pass-1 Accuracy: \t\t{c / N:.2f}")
     for m, c in correct_by_method.items():
-        logging.info(f"{m} Accuracy: {c / N:.2f}")
+        logging.info(f"{m} Accuracy: \t\t{c / N:.2f}")
     
 
     logging.info("Question Types: " + "\t".join(valid_types))

@@ -274,6 +274,7 @@ if __name__ == "__main__":
         _generate_answers_args = [(m, prompts[m]) for m in evaluation_methods]
         
         for method, prompt in _generate_answers_args:
+                
             valid_model_outputs, model_answers, final_answer = _generate_answers(prompt, model, tokenizer, args, causal_data_path, data_save_path)
             is_acc = (final_answer is not None) and (final_answer.lower() == ground_truth)
             

@@ -65,7 +65,7 @@ def load_model(model_name: str) -> Tuple[AutoModelForCausalLM, AutoTokenizer]:
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='Calculate information gain')
+    parser = argparse.ArgumentParser(description='')
     parser.add_argument('--dataset_name', type=str, default="causal_code")
     parser.add_argument('--data_split', type=str, default="train")
     parser.add_argument(
@@ -75,28 +75,9 @@ def parse_args():
         choices=tuple(SUPPORTED_MODELS.keys()),
         help="Model used to generate data / CoT.",
     )
-    parser.add_argument(
-        "--prompting_method",
-        type=str,
-        default="zero_shot",
-        choices=("zero_shot", "zero_shot_cot", "zero_shot_insert_explanations", "zero_shot_causal", "zero_shot_causal_refined", "zero_shot_causal_cot", "zero_shot_causal_refined_cot"),
-        help="Prompting method used to generate data / CoT.",
-    )
-    parser.add_argument("--mode", type=str, default="answer", choices=("answer", "step"))
-    parser.add_argument("--metric", type=str, default="Sentropy", choices=("Xentropy", "Sentropy", "ppl"))
-    parser.add_argument('--category', type=str, default="algebra")
-    parser.add_argument('--summary', action='store_true')
-    parser.add_argument('--sc', action='store_true')
-    parser.add_argument('--plot', action='store_true')
     parser.add_argument('--temperature', type=float, default=0.7)
     parser.add_argument('--max_new_tokens', type=int, default=2048)
     parser.add_argument('--num_return_sequences', type=int, default=1)
-    parser.add_argument(
-        "--probe_model",
-        type=str,
-        default="qwen2.5-7b-instruct",
-        choices=tuple(SUPPORTED_MODELS.keys()),
-    )
     args = parser.parse_args()
     return args
 
