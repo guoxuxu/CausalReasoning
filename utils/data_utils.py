@@ -38,12 +38,12 @@ def load_data(DATA_PATH, dataset_name, data_split):
     print(f"Ground Truth == 'Yes': {yes_count}")
     print(f"Ground Truth == 'No' : {no_count}")
     filtered = filtered.map(lambda x: {"Question Type": x["Question Type"].lower() if isinstance(x["Question Type"], str) else x["Question Type"]})
-    valid_types = {
+    valid_types = [
         'from effect to cause without intervention',
         'from effect to cause with intervention',
         'from cause to effect with intervention',
         'from cause to effect without intervention'
-    }
+    ]
     filtered = filtered.filter(lambda x: x["Question Type"] in valid_types)
     print(Counter(filtered['Question Type']))
     
@@ -86,10 +86,10 @@ def get_prompt(prompt_name: str) -> str:
         return (
             "\nYou are an expert in causal reasoning. "
             'Given the following problem description and question, and optionally a list of causal links, '
-            "synthesize these causal links into concise, natural-language statements, summarizing how the identified variables causally influence each other."
-            "Avoid redundancy or repetition. Use only few sentences as necessary to preserve clarity. "
-            "If no causal links are provided, first identify all relevant variables and their direct causal links, "
-            "then summarize them in natural language. "
+            'If no causal links are provided, first identify all relevant variables and their direct causal links as "A → B" (meaning A directly causes B). '
+            "examine the causal links to ensure logical consistency: remove duplicate, redundant, or self-referential relations (e.g., both 'A → B' and 'B → A', or 'A → A')."
+            "Then, synthesize these causal links into concise, natural-language statements, summarizing how one variable causally influence another."
+            "Use as few sentences as needed to maintain clarity. "
             'Do not provide any final answer to the question. Output strictly in JSON format: {"causal_relation": "<concise natural-language causal description>"}.\n'
         )
 

@@ -131,7 +131,7 @@ if __name__ == "__main__":
     dataset_name = args.dataset_name
     dataset = load_data(DATA_PATH=Path("Data"), dataset_name=dataset_name, data_split=args.data_split)
     # dataset = sample_subset(dataset, n_per_class=500)
-    dataset = dataset.select(range(15))
+    # dataset = dataset.select(range(15))
     model, tokenizer = load_model(args.data_model)
     
     
@@ -210,10 +210,13 @@ if __name__ == "__main__":
         return valid_model_outputs, model_answers, final_answer
         
     
-    def _check_causal_map_files(dataset, causal_data_path: Path):
+    def _check_causal_map_files(dataset, causal_data_path: Path, overwrite=False):
         missing_ids = []
         for ex in tqdm(dataset, desc="Checking causal map files"):
             ex_id = ex.get("ID")
+            if overwrite:
+                missing_ids.append(ex_id)
+                continue
             json_path = causal_data_path / f"{ex_id}.json"
             if not json_path.exists():
                 missing_ids.append(ex_id)
@@ -221,7 +224,7 @@ if __name__ == "__main__":
     
     
     causal_data_path = create_save_path(Path("Causal_Map"), args)
-    causal_map_missing_ids = _check_causal_map_files(dataset, causal_data_path)
+    causal_map_missing_ids = _check_causal_map_files(dataset, causal_data_path, overwrite=False)
     
     if causal_map_missing_ids:
         start_time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
@@ -235,6 +238,7 @@ if __name__ == "__main__":
     data_save_path = create_save_path(Path("Results"), args)
     start_time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
     logging.info(f"{start_time_str}: {args.data_model} Generating Answer ...")
+    inpsection_ids = []
 
     evaluation_methods = ["zs", 
                             "zs_cot", 
@@ -281,6 +285,8 @@ if __name__ == "__main__":
             })
             if is_acc:
                 correct_by_method[method] += 1
+        if results["zs_causal_Inte_is_acc"] == False and results["zs_Explanation_is_acc"] == True:
+            inpsection_ids.append(ex_id)
             
         output_file = data_save_path / f"{ex_id}.json"
         with open(output_file, 'w', encoding='utf-8') as f:
@@ -289,3 +295,4 @@ if __name__ == "__main__":
     N = len(dataset)
     for m, c in correct_by_method.items():
         logging.info(f"{m} Accuracy: {c / N:.2f}")
+    logging.info(f"inpsection_ids: {inpsection_ids}")
