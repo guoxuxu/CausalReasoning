@@ -67,9 +67,9 @@ if __name__ == "__main__":
     N = len(problem_files)
     logging.info(f"Number of Problems: {N}")
     for m, c in pass_1_correct_by_method.items():
-        logging.info(f"{m} Pass-1 Accuracy: \t\t{c / N:.2f}")
+        logging.info(f"{m} Pass-1 Accuracy: \t\t{c / N:.4f} ({c}/{N})")
     for m, c in correct_by_method.items():
-        logging.info(f"{m} Accuracy: \t\t{c / N:.2f}")
+        logging.info(f"{m} Accuracy: \t\t{c / N:.4f} ({c}/{N})")
     
 
     logging.info("Question Types: " + "\t".join(valid_types))
@@ -81,7 +81,7 @@ if __name__ == "__main__":
                 accuracy = qtyep_dict[t] / qtyep_count
             else:
                 accuracy = 0.0
-            accuracy_list.append(f"{accuracy:.2f}")
+            accuracy_list.append(f"{accuracy:.4f}")
         logging.info(f"{m} Accuracy: \t\t" + "\t".join(accuracy_list))
     
     logging.info(f"Explanation Correct, causal Wrong: {inpsection_ids_1}")

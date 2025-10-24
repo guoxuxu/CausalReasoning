@@ -67,7 +67,6 @@ def call_openai_model(
 if __name__ == "__main__":
     from utils.model_utils import setup_logging, parse_arguments
     from utils.data_utils import create_save_path
-    # from gpt4all import GPT4All
     
     setup_logging()
     args = parse_args()

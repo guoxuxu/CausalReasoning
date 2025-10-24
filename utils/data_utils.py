@@ -6,6 +6,7 @@ from collections import Counter
 from datasets import Dataset, DatasetDict
 import random
 from tqdm import tqdm
+import json
 
 
 def load_data(DATA_PATH, dataset_name, data_split):
@@ -29,25 +30,85 @@ def load_data(DATA_PATH, dataset_name, data_split):
         dataset = load_dataset("csv", data_files=os.path.join(DATA_PATH, "CausalBench/CausalBench_Text_Part.csv"))
         dataset = dataset.rename_column("Scenario ID", "ID")
         dataset = dataset.rename_column("Scenario and Question", "Problem")
+        
+    elif dataset_name == 'e_care':
+        cr_dataset = load_dataset(
+            "json",
+            data_files={
+                "train": str(DATA_PATH / "e-CARE/dataset/Causal_Reasoning/train.jsonl"),
+                "dev":   str(DATA_PATH / "e-CARE/dataset/Causal_Reasoning/dev.jsonl"),
+            }
+        )
+        def _read_jsonl(path: Path):
+            with open(path, "r", encoding="utf-8") as f:
+                return [json.loads(line) for line in f]
+        def _norm_id(v):
+            try:
+                return int(v)
+            except Exception:
+                return str(v)
+        
+        train_explain_data = _read_jsonl(DATA_PATH / "e-CARE/dataset/Explanation_Generation/train.jsonl")
+        dev_explain_data   = _read_jsonl(DATA_PATH / "e-CARE/dataset/Explanation_Generation/dev.jsonl")
+
+        train_explanation_map = {}
+        for example in train_explain_data:
+            ex_id = _norm_id(example.get("index"))
+            train_explanation_map[ex_id] = example.get("conceptual_explanation", "")
+        dev_explanation_map = {}
+        for example in dev_explain_data:
+            ex_id = _norm_id(example.get("index"))
+            dev_explanation_map[ex_id] = example.get("conceptual_explanation", "")
+
+        # sort by index to align
+        for split, exp_map in (("train", train_explanation_map), ("dev", dev_explanation_map)):
+            ds = cr_dataset[split]
+            explanations = []
+            for row in ds:
+                ex_id = _norm_id(row.get("index"))
+                explanations.append(exp_map.get(ex_id, ""))
+            
+            ds = ds.add_column("Explanation", explanations)
+            cr_dataset[split] = ds
     
-    dataset = dataset[data_split]
+        for split in cr_dataset.keys():
+            ds = cr_dataset[split]
+            ds = ds.rename_column("index", "ID")
+        filtered = cr_dataset[data_split]
+        filtered = filtered.map(
+            lambda example: {
+                "Problem": (
+                    example.get("premise")
+                    + f"\nWhat is the {example.get('ask-for')}?\n"
+                    f"Hypothesis 1: {example.get('hypothesis1')}\n"
+                    f"Hypothesis 2: {example.get('hypothesis2')}\n"
+                    "Which hypothesis is correct?"
+                )
+            }
+        )
+        # change labels 0, 1 into 1, 2, int type
+        
+    elif dataset_name == 'copa':
+        pass        
     
-    filtered = dataset.filter(lambda x: x["Ground Truth"] in ["Yes", "No"])
-    filtered = filtered.map(lambda x: {"Question Type": x["Question Type"].lower() if isinstance(x["Question Type"], str) else x["Question Type"]})
-    valid_types = [
-        'from effect to cause without intervention',
-        'from effect to cause with intervention',
-        'from cause to effect with intervention',
-        'from cause to effect without intervention'
-    ]
-    filtered = filtered.filter(lambda x: x["Question Type"] in valid_types)
-    yes_count = sum(1 for x in filtered if x["Ground Truth"] == "Yes")
-    no_count = sum(1 for x in filtered if x["Ground Truth"] == "No")
-    print(f"Ground Truth == 'Yes': {yes_count}")
-    print(f"Ground Truth == 'No' : {no_count}")
-    print(Counter(filtered['Question Type']))
     
-    filtered = filtered.map(lambda example, idx: {"ID": idx + 1}, with_indices=True)
+    if "causal" in dataset_name:
+        dataset = dataset[data_split]
+        filtered = dataset.filter(lambda x: x["Ground Truth"] in ["Yes", "No"])
+        filtered = filtered.map(lambda x: {"Question Type": x["Question Type"].lower() if isinstance(x["Question Type"], str) else x["Question Type"]})
+        valid_types = [
+            'from effect to cause without intervention',
+            'from effect to cause with intervention',
+            'from cause to effect with intervention',
+            'from cause to effect without intervention'
+        ]
+        filtered = filtered.filter(lambda x: x["Question Type"] in valid_types)
+        yes_count = sum(1 for x in filtered if x["Ground Truth"] == "Yes")
+        no_count = sum(1 for x in filtered if x["Ground Truth"] == "No")
+        print(f"Ground Truth == 'Yes': {yes_count}")
+        print(f"Ground Truth == 'No' : {no_count}")
+        print(Counter(filtered['Question Type']))
+        filtered = filtered.map(lambda example, idx: {"ID": idx + 1}, with_indices=True)
     return filtered
 
 
