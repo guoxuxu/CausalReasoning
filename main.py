@@ -224,7 +224,7 @@ if __name__ == "__main__":
     
     
     causal_data_path = create_save_path(Path("Causal_Map"), args)
-    causal_map_missing_ids = _check_causal_map_files(dataset, causal_data_path, overwrite=False)
+    causal_map_missing_ids = _check_causal_map_files(dataset, causal_data_path, overwrite=True)
     
     if causal_map_missing_ids:
         start_time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())

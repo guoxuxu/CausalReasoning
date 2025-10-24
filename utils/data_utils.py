@@ -33,10 +33,6 @@ def load_data(DATA_PATH, dataset_name, data_split):
     dataset = dataset[data_split]
     
     filtered = dataset.filter(lambda x: x["Ground Truth"] in ["Yes", "No"])
-    yes_count = sum(1 for x in filtered if x["Ground Truth"] == "Yes")
-    no_count = sum(1 for x in filtered if x["Ground Truth"] == "No")
-    print(f"Ground Truth == 'Yes': {yes_count}")
-    print(f"Ground Truth == 'No' : {no_count}")
     filtered = filtered.map(lambda x: {"Question Type": x["Question Type"].lower() if isinstance(x["Question Type"], str) else x["Question Type"]})
     valid_types = [
         'from effect to cause without intervention',
@@ -45,6 +41,10 @@ def load_data(DATA_PATH, dataset_name, data_split):
         'from cause to effect without intervention'
     ]
     filtered = filtered.filter(lambda x: x["Question Type"] in valid_types)
+    yes_count = sum(1 for x in filtered if x["Ground Truth"] == "Yes")
+    no_count = sum(1 for x in filtered if x["Ground Truth"] == "No")
+    print(f"Ground Truth == 'Yes': {yes_count}")
+    print(f"Ground Truth == 'No' : {no_count}")
     print(Counter(filtered['Question Type']))
     
     filtered = filtered.map(lambda example, idx: {"ID": idx + 1}, with_indices=True)
