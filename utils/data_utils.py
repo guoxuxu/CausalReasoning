@@ -30,6 +30,84 @@ def load_data(DATA_PATH, dataset_name, data_split):
         dataset = load_dataset("csv", data_files=os.path.join(DATA_PATH, "CausalBench/CausalBench_Text_Part.csv"))
         dataset = dataset.rename_column("Scenario ID", "ID")
         dataset = dataset.rename_column("Scenario and Question", "Problem")
+    
+    elif dataset_name == 'medmcqa':
+        dataset = load_dataset("openlifescienceai/medmcqa")
+        dataset["dev"] = dataset["validation"]
+        dataset = dataset[data_split]
+        filtered = dataset.map(
+            lambda example: {"Problem": f"{example.get('question')}\n\nOption 1: {example.get('opa')}\nOption 2: {example.get('opb')}\nOption 3: {example.get('opc')}\nOption 4: {example.get('opd')}\n\nSelect the correct option."}
+        )
+        filtered = filtered.filter(lambda x: x["exp"] is not None)
+        filtered = filtered.rename_column("exp", "Explanation")
+        filtered = filtered.rename_column("cop", "Ground Truth")
+        filtered = filtered.rename_column("subject_name", "Question Type")
+        filtered = filtered.map(
+            lambda example, idx: {"ID": idx + 1}, with_indices=True
+        )
+
+    elif dataset_name == 'cola':
+        dataset = load_dataset("json", data_files=os.path.join(DATA_PATH, "COLA/COPES.json"))
+        # filter res_idx is not integer and is null and is less than 0
+        dataset = dataset.filter(lambda x: isinstance(x["res_idx"], int) and x["res_idx"] >= 0)
+        dataset = dataset.map(
+            lambda example: {"Effect": example.get("story")[example.get("res_idx")]}
+        )
+        # filter rows where cause_idx is not list and is null list
+        dataset = dataset.filter(lambda x: isinstance(x["cause_idx"], list) and len(x["cause_idx"]) > 0)
+        dataset = dataset.map(
+            lambda example: {"Ground Truth": example.get("cause_idx")}
+        )
+        dataset = dataset.map(
+            lambda example: {"Problem": "\n".join([f"Event {i+1}: {s}" for i, s in enumerate(example["story"])])}
+        )
+        dataset = dataset.map(
+            lambda example: {"Problem": example.get("Problem") + f"\n\nEffect: {example.get('Effect')}\n\n" + "Which of the events have a **direct causal link** to the effect? "}
+        )
+        # add ID column
+        filtered = dataset[data_split]
+        filtered = filtered.map(
+            lambda example, idx: {"ID": idx + 1}, with_indices=True
+        )
+    
+    elif dataset_name == 'copa':
+        dataset = load_dataset(
+            "json",
+            data_files={
+                "train": str(DATA_PATH / "COPA/train.jsonl"),
+                "dev":   str(DATA_PATH / "COPA/val.jsonl"),
+            }
+        )
+        for split in dataset.keys():
+            ds = dataset[split]
+            ds = ds.map(lambda ex: {"label": int(ex["label"]) + 1})
+            ds = ds.rename_column("label", "Ground Truth")
+            ds = ds.rename_column("idx", "ID")
+            dataset[split] = ds
+        
+        # merge train and dev into one dataset called test
+        dataset = DatasetDict({
+            "train": Dataset.from_dict({key: sum([dataset[split][key] for split in dataset.keys()], []) 
+                                   for key in dataset[list(dataset.keys())[0]].column_names})
+        })
+        assert data_split == 'train'
+        filtered = dataset[data_split]
+        filtered = filtered.map(
+            lambda example: {
+                "Problem": (
+                    f"Given the premise - {example.get('premise')}\n\n"
+                    f"Two possible hypotheses are proposed:\n"
+                    f"Hypothesis 1: {example.get('choice1')}\n"
+                    f"Hypothesis 2: {example.get('choice2')}\n"
+                    f"{example.get('question')}"
+                )
+            }
+        )
+        yes_count = sum(1 for x in filtered if x["Ground Truth"] == 1)
+        no_count = sum(1 for x in filtered if x["Ground Truth"] == 2)
+        print(f"Ground Truth == 1: {yes_count}")
+        print(f"Ground Truth == 2 : {no_count}")
+        
         
     elif dataset_name == 'e_care':
         cr_dataset = load_dataset(
@@ -69,18 +147,16 @@ def load_data(DATA_PATH, dataset_name, data_split):
                 explanations.append(exp_map.get(ex_id, ""))
             
             ds = ds.add_column("Explanation", explanations)
-            cr_dataset[split] = ds
-    
-        for split in cr_dataset.keys():
-            ds = cr_dataset[split]
             ds = ds.map(lambda ex: {"label": int(ex["label"]) + 1})
             ds = ds.rename_column("index", "ID")
             ds = ds.rename_column("label", "Ground Truth")  
+            cr_dataset[split] = ds
+    
         filtered = cr_dataset[data_split]
         filtered = filtered.map(
             lambda example: {
                 "Problem": (
-                    f"Determine the {example.get('ask-for')} of the premise - {example.get('premise')}.\n\n"
+                    f"Determine the {example.get('ask-for')} of the premise - {example.get('premise')}\n\n"
                     f"Two possible hypotheses are proposed:\n"
                     f"Hypothesis 1: {example.get('hypothesis1')}\n"
                     f"Hypothesis 2: {example.get('hypothesis2')}\n"
@@ -88,10 +164,10 @@ def load_data(DATA_PATH, dataset_name, data_split):
                 )
             }
         )
-        # change labels 0, 1 into 1, 2, int type
-        
-    elif dataset_name == 'copa':
-        pass        
+        yes_count = sum(1 for x in filtered if x["Ground Truth"] == 1)
+        no_count = sum(1 for x in filtered if x["Ground Truth"] == 2)
+        print(f"Ground Truth == 1: {yes_count}")
+        print(f"Ground Truth == 2 : {no_count}")
     
     
     if "causal" in dataset_name:
@@ -165,6 +241,8 @@ def prepare_input(example, prompting_method, dataset_name):
         answer_format = '{"answer":"Yes"} or {"answer":"No"}'
     elif dataset_name == "e_care":
         answer_format = '{"answer": 1} or {"answer": 2}'
+    elif dataset_name == "cola":
+        answer_format = '{"answer": [event_numbers in order]}. List event numbers in order. (If there is only one cause, still respond as a list)'        
     else:
         answer_format = ''
         
@@ -272,7 +350,7 @@ if __name__ == "__main__":
         dataset.column_names
     )
     Results_ROOT = Path("Results")
-    data_save_path = data_save_path(Results_ROOT, args)
+    data_save_path = create_save_path(Results_ROOT, args)
     logging.info(
         "Data will be saved to %s",
         data_save_path

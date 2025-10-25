@@ -80,6 +80,36 @@ def extract_causal_relation(text):
     return m.group(1).strip()
 
 
+def extract_list(text):
+    if not isinstance(text, str):
+        return []
+    s = text.strip()
+    try:
+        obj = json.loads(s)
+        if isinstance(obj, dict) and "answer" in obj:
+            val = obj["answer"]
+            if isinstance(val, list):
+                return sorted(val)
+            elif isinstance(val, (int, float, str)):
+                return sorted([int(val)])
+    except Exception:
+        pass
+    pattern = re.compile(r'"\s*answer\s*"\s*:\s*(\[[^\]]*\])', re.IGNORECASE)
+    m = pattern.search(s)
+    if m:
+        try:
+            val = json.loads(m.group(1))
+            if isinstance(val, list):
+                return sorted(val)
+        except Exception:
+            pass
+    
+    m = re.search(r'\b\d+\b', s)
+    if m:
+        return [int(m.group(0))]
+    return []
+    
+
 def extract_option(text):
     if not isinstance(text, str):
         return None
@@ -155,7 +185,7 @@ if __name__ == "__main__":
     dataset_name = args.dataset_name
     dataset = load_data(DATA_PATH=Path("Data"), dataset_name=dataset_name, data_split=args.data_split)
     # dataset = sample_subset(dataset, n_per_class=500)
-    # dataset = dataset.select(range(15))
+    # dataset = dataset.select(range(5))
     model, tokenizer = load_model(args.data_model)
     
     
@@ -225,6 +255,9 @@ if __name__ == "__main__":
         for text in model_outputs:
             if args.dataset_name == 'e_care':
                 answer = extract_option(text)
+            elif args.dataset_name == 'cola':    
+                answer = extract_list(text)
+                answer = str(answer[0]) if answer else None
             else:
                 answer = extract_answer(text)
             if answer is not None:  
@@ -266,18 +299,21 @@ if __name__ == "__main__":
     data_save_path = create_save_path(Path("Results"), args)
     start_time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
     logging.info(f"{start_time_str}: {args.data_model} Generating Answer ...")
-    inpsection_ids = []
 
     evaluation_methods = ["zs", 
                             "zs_cot", 
-                            "zs_Explanation", 
                             "zs_causal", 
                             "zs_causal_Inte"]
+    if dataset_name != "cola":
+        evaluation_methods += [
+            "zs_Explanation", 
+        ]
+    
     correct_by_method = {m: 0 for m in evaluation_methods}
 
     for example in tqdm(dataset, desc="Evaluating"):
         ex_id = example.get("ID")
-        ground_truth = example["Ground Truth"].lower().strip()
+        ground_truth = example["Ground Truth"]
         
         json_path = causal_data_path / f"{ex_id}.json"
         with open(json_path, "r", encoding="utf-8") as f:
@@ -285,26 +321,31 @@ if __name__ == "__main__":
         
         causal_map = str(causal_data.get("causal_map", ""))
         causal_map_integration = str(causal_data.get("causal_map_integration", ""))
+        example.update({
+            "causal_map": causal_map,
+            "causal_map_integration": causal_map_integration,
+        })
+        
         results = {
             "ID": ex_id,
             "Problem": example.get("Problem"),
             'Question Type': example.get("Question Type"),
             "Ground Truth": ground_truth,
-            "Explanation": example.get("Explanation"),
             "causal_map": causal_map,
             "causal_map_integration": causal_map_integration,
         }
-        example.update({
-            "causal_map": causal_map,
-            "causal_map_integration": causal_map_integration,
-        })
+        if dataset_name != "cola":
+            results.update({
+                "Explanation": example.get("Explanation"),
+            })
+        
         prompts = {m: prepare_input(example, m, dataset_name) for m in evaluation_methods}
         _generate_answers_args = [(m, prompts[m]) for m in evaluation_methods]
         
         for method, prompt in _generate_answers_args:
                 
             valid_model_outputs, model_answers, final_answer = _generate_answers(prompt, model, tokenizer, args, causal_data_path, data_save_path)
-            is_acc = (final_answer is not None) and (final_answer.lower() == ground_truth)
+            is_acc = (final_answer is not None) and (str(final_answer).lower() == str(ground_truth).lower().strip(""))
             
             results.update({
                 f"{method}_outputs": valid_model_outputs,
@@ -314,8 +355,6 @@ if __name__ == "__main__":
             })
             if is_acc:
                 correct_by_method[method] += 1
-        if results["zs_causal_Inte_is_acc"] == False and results["zs_Explanation_is_acc"] == True:
-            inpsection_ids.append(ex_id)
             
         output_file = data_save_path / f"{ex_id}.json"
         with open(output_file, 'w', encoding='utf-8') as f:
@@ -324,4 +363,3 @@ if __name__ == "__main__":
     N = len(dataset)
     for m, c in correct_by_method.items():
         logging.info(f"{m} Accuracy: {c / N:.2f}")
-    logging.info(f"inpsection_ids: {inpsection_ids}")
