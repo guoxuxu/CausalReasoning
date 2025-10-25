@@ -73,16 +73,18 @@ def load_data(DATA_PATH, dataset_name, data_split):
     
         for split in cr_dataset.keys():
             ds = cr_dataset[split]
+            ds = ds.map(lambda ex: {"label": int(ex["label"]) + 1})
             ds = ds.rename_column("index", "ID")
+            ds = ds.rename_column("label", "Ground Truth")  
         filtered = cr_dataset[data_split]
         filtered = filtered.map(
             lambda example: {
                 "Problem": (
-                    example.get("premise")
-                    + f"\nWhat is the {example.get('ask-for')}?\n"
+                    f"Determine the {example.get('ask-for')} of the premise - {example.get('premise')}.\n\n"
+                    f"Two possible hypotheses are proposed:\n"
                     f"Hypothesis 1: {example.get('hypothesis1')}\n"
                     f"Hypothesis 2: {example.get('hypothesis2')}\n"
-                    "Which hypothesis is correct?"
+                    "Which hypothesis most accurately reflects the causal relation implied by the premise?"
                 )
             }
         )
@@ -148,7 +150,7 @@ def get_prompt(prompt_name: str) -> str:
             "\nYou are an expert in causal reasoning. "
             'Given the following problem description and question, and optionally a list of causal links, '
             'If no causal links are provided, first identify all relevant variables and their direct causal links as "A → B" (meaning A directly causes B). '
-            "examine the causal links to ensure logical consistency: remove duplicate, redundant, or self-referential relations (e.g., both 'A → B' and 'B → A', or 'A → A')."
+            "Examine the causal links to ensure logical consistency: remove duplicate, redundant, or self-referential relations (e.g., both 'A → B' and 'B → A', or 'A → A')."
             "Then, synthesize these causal links into concise, natural-language statements, summarizing how one variable causally influence another."
             "Use as few sentences as needed to maintain clarity. "
             'Do not provide any final answer to the question. Output strictly in JSON format: {"causal_relation": "<concise natural-language causal description>"}.\n'
@@ -158,72 +160,81 @@ def get_prompt(prompt_name: str) -> str:
 def prepare_input(example, prompting_method, dataset_name):
     pm = prompting_method
     
-    if "causal" in dataset_name:
-        problem = example.get("Problem")
-    
+    problem = example.get("Problem")
+    if ("causal" in dataset_name):
+        answer_format = '{"answer":"Yes"} or {"answer":"No"}'
+    elif dataset_name == "e_care":
+        answer_format = '{"answer": 1} or {"answer": 2}'
+    else:
+        answer_format = ''
+        
     if pm == "zs":
         # default to zero_shot
         prefix = (
-            "\nYou are given a problem description and a yes/no question. "
-            'Answer exactly in the JSON format: {"answer":"Yes"} or {"answer":"No"}. '
-            "Do not include any explanations or extra text. \n"
+            "\nYou are given a problem description and a question. "
+            f'Answer exactly in the JSON format: {answer_format}. '
+            "Do not include any explanations or extra text. \n\n"
         )
-        prompt = prefix + '\n\n' +problem
+        prompt = prefix + problem
         
+            
     elif pm == "zs_cot":
         prefix = (
-            "\nYou are given a problem description and a yes/no question. "
+            "\nYou are given a problem description and a question. "
             "Think step by step before answering. "
-            'After reasoning, output your final answer in the JSON format: {"answer":"Yes"} or {"answer":"No"}. \n'
+            f'After reasoning, output your final answer in the JSON format: {answer_format}. \n\n'
         )
-        prompt = prefix + '\n\n' +problem
+        prompt = prefix + problem
         
-    elif pm == "zs_Explanation" and ("causal" in dataset_name):
+    elif pm == "zs_Explanation":
         prefix = (
-            "\nYou are given a problem description, a yes/no question, and an explanation. "
-            'Answer exactly in the JSON format: {"answer":"Yes"} or {"answer":"No"}. '
-            "Do not include any explanations or extra text. \n"
+            "\nYou are given a problem description, a question, and an explanation. "
+            f'Answer exactly in the JSON format: {answer_format}. '
+            "Do not include any explanations or extra text. \n\n"
         )
-        example["Problem"] = example["Problem"] + '\n' + example["Explanation"]
-        problem = example.get("Problem")
-        prompt = prefix + '\n\n' +problem
+
+        prompt = prefix + problem + "\n\n" + example["Explanation"]
     
     elif pm == "zs_causal":
         causal_map = example.get("causal_map")
         prefix = (
             "\nYou are an expert in causal reasoning. "
             'Given the following problem description, question, and the causal relationships related to this problem.'
-            'Answer exactly in the JSON format: {"answer":"Yes"} or {"answer":"No"}. '
-            "Do not include any explanations or extra text. \n"
+             f'Answer exactly in the JSON format: {answer_format}. '
+            "Do not include any explanations or extra text. \n\n"
         )
-        prompt = prefix  + '\n\n' + problem  + '\n\n' + causal_map
+        prompt = prefix  + problem  + '\n\n' + causal_map
+        
+        
     elif pm == "zs_causal_Inte":
         causal_map = example.get("causal_map_integration")
         prefix = (
             "\nYou are an expert in causal reasoning. "
-            'Given the following problem description, question, and the causal relationships related to this problem.'
-            'Answer exactly in the JSON format: {"answer":"Yes"} or {"answer":"No"}. '
+            'Given the following problem description, question, and the causal statements related to this problem.'
+            f'Answer exactly in the JSON format: {answer_format}. '
             "Do not include any explanations or extra text. \n"
         )
-        prompt = prefix + '\n\n' + problem  + '\n\n' + causal_map
+        prompt = prefix + problem  + '\n\n' + causal_map
+        
     elif pm == "zs_causal_cot":
         causal_map = example.get("causal_map")
         prefix = (
             "\nYou are an expert in causal reasoning. "
             'Given the following problem description, question, and the causal relationships related to this problem.'
             'Think step by step before answering. '
-            'After reasoning, output your final answer in the JSON format: {"answer":"Yes"} or {"answer":"No"}. \n'
+            f'After reasoning, output your final answer in the JSON format: {answer_format}. \n\n'
         )
-        prompt = prefix + '\n\n' + problem  + '\n\n' + causal_map
+        prompt = prefix + problem  + '\n\n' + causal_map
+        
     elif pm == "zs_causal_Inte_cot":
         causal_map = example.get("causal_map_integration")
         prefix = (
             "\nYou are an expert in causal reasoning. "
-            'Given the following problem description, question, and the causal relationships related to this problem.'
+            'Given the following problem description, question, and the causal statements related to this problem.'
             'Think step by step before answering. '
-            'After reasoning, output your final answer in the JSON format: {"answer":"Yes"} or {"answer":"No"}. \n'
+            f'After reasoning, output your final answer in the JSON format: {answer_format}. \n\n'
         )
-        prompt = prefix + '\n\n' + problem  + '\n\n' + causal_map
+        prompt = prefix + problem  + '\n\n' + causal_map
     else:
         raise ValueError(f"Unsupported prompting method: {prompting_method}")
     

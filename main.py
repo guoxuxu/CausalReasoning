@@ -80,6 +80,30 @@ def extract_causal_relation(text):
     return m.group(1).strip()
 
 
+def extract_option(text):
+    if not isinstance(text, str):
+        return None
+    s = text.strip()
+    try:
+        obj = json.loads(s)
+        ans = obj.get("answer", None)
+        if isinstance(ans, (int, float)):
+            ans = str(int(ans))
+        if isinstance(ans, str) and ans.strip() in {"1", "2"}:
+            return ans.strip()
+    except Exception:
+        pass
+    
+    pattern = re.compile(
+        r'"\s*answer\s*"\s*:\s*"?([12])"?',
+        re.IGNORECASE
+    )
+    m = pattern.search(s)
+    if m:
+        return m.group(1)
+    return None
+
+
 def extract_answer(text):
     if not isinstance(text, str):
         return None
@@ -197,12 +221,16 @@ if __name__ == "__main__":
         model_outputs = test_generation(prompt, model, tokenizer, args)
         
         valid_model_outputs = []
+        model_answers = []
         for text in model_outputs:
-            answer = extract_answer(text)
+            if args.dataset_name == 'e_care':
+                answer = extract_option(text)
+            else:
+                answer = extract_answer(text)
             if answer is not None:  
                 valid_model_outputs.append(text)
+                model_answers.append(answer)
 
-        model_answers = [extract_answer(ans) for ans in valid_model_outputs]
         if len(model_answers) > 1:
             final_answer, majority_count, first_idx = majority_voting(model_answers)
         else:
