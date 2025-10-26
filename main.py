@@ -117,15 +117,13 @@ def extract_option(text):
     try:
         obj = json.loads(s)
         ans = obj.get("answer", None)
-        if isinstance(ans, (int, float)):
-            ans = str(int(ans))
-        if isinstance(ans, str) and ans.strip() in {"1", "2"}:
-            return ans.strip()
+        if ans is not None:
+            return str(ans).strip()
     except Exception:
         pass
     
     pattern = re.compile(
-        r'"\s*answer\s*"\s*:\s*"?([12])"?',
+        r'"\s*answer\s*"\s*:\s*"?([^"\s,}]+)"?',  # the value of answer can be with or without quotes
         re.IGNORECASE
     )
     m = pattern.search(s)
@@ -253,7 +251,7 @@ if __name__ == "__main__":
         valid_model_outputs = []
         model_answers = []
         for text in model_outputs:
-            if args.dataset_name == 'e_care':
+            if args.dataset_name in ['e_care', "medmcqa"]:
                 answer = extract_option(text)
             elif args.dataset_name == 'cola':    
                 answer = extract_list(text)
@@ -263,11 +261,13 @@ if __name__ == "__main__":
             if answer is not None:  
                 valid_model_outputs.append(text)
                 model_answers.append(answer)
-
-        if len(model_answers) > 1:
-            final_answer, majority_count, first_idx = majority_voting(model_answers)
+        if model_answers:
+            if len(model_answers) > 1:
+                final_answer, majority_count, first_idx = majority_voting(model_answers)
+            else:
+                final_answer = model_answers[0]
         else:
-            final_answer = model_answers[0]
+            final_answer = None
         return valid_model_outputs, model_answers, final_answer
         
     
@@ -284,8 +284,8 @@ if __name__ == "__main__":
         return missing_ids
     
     
-    causal_data_path = create_save_path(Path("Causal_Map"), args)
-    causal_map_missing_ids = _check_causal_map_files(dataset, causal_data_path, overwrite=True)
+    causal_data_path = create_save_path(Path("Causal_Map_1"), args)
+    causal_map_missing_ids = _check_causal_map_files(dataset, causal_data_path, overwrite=False)
     
     if causal_map_missing_ids:
         start_time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
@@ -296,7 +296,7 @@ if __name__ == "__main__":
 
     
     # Evaluation: Generate Answers
-    data_save_path = create_save_path(Path("Results"), args)
+    data_save_path = create_save_path(Path("Results/Causal_Map_1"), args)
     start_time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
     logging.info(f"{start_time_str}: {args.data_model} Generating Answer ...")
 

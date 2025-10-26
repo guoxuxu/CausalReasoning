@@ -36,11 +36,13 @@ def load_data(DATA_PATH, dataset_name, data_split):
         dataset["dev"] = dataset["validation"]
         dataset = dataset[data_split]
         filtered = dataset.map(
-            lambda example: {"Problem": f"{example.get('question')}\n\nOption 1: {example.get('opa')}\nOption 2: {example.get('opb')}\nOption 3: {example.get('opc')}\nOption 4: {example.get('opd')}\n\nSelect the correct option."}
+            lambda example: {"Problem": f"{example.get('question')}\n\n" +
+                             f"Option 1: {example.get('opa')}\nOption 2: {example.get('opb')}\nOption 3: {example.get('opc')}\nOption 4: {example.get('opd')}\n\n" +
+                             "Choose the one correct option."}
         )
         filtered = filtered.filter(lambda x: x["exp"] is not None)
         filtered = filtered.rename_column("exp", "Explanation")
-        filtered = filtered.rename_column("cop", "Ground Truth")
+        filtered = filtered.map(lambda ex: {"Ground Truth": int(ex["cop"]) + 1})
         filtered = filtered.rename_column("subject_name", "Question Type")
         filtered = filtered.map(
             lambda example, idx: {"ID": idx + 1}, with_indices=True
@@ -216,18 +218,25 @@ def get_prompt(prompt_name: str) -> str:
     if prompt_name == "causal_map_prompt":
         return (
             "\nYou are an expert in causal reasoning. "
-            'Given the following problem description and question, identify all relevant variables and describe their direct causal relationships.'
-            'Your output should be a clear causal map in textual form, listing directed causal links as "A → B" (meaning A directly causes B).'
-            "Avoid redundancy or duplicate links. List only distinct and meaningful causal relations. "
+            # 'Given the following problem description and question, identify all relevant variables and describe their direct causal relationships.'
+            # 'Your output should be a clear causal map in textual form, listing directed causal links as "A → B" (meaning A directly causes B).'
+            # "Avoid redundancy or duplicate links. List only distinct and meaningful causal relations. "
+            'Given the following problem description and question, identify only **mechanistic causal relationships** - '
+            'that is, links that explain *why* one variable causes another, not merely that they co-occur or happen sequentially. '
+            'List distinct and meaningful causal links in textual form as "A → B" (meaning A directly causes B by mechanism).'
+            "Avoid redundancy, duplication, or suprious relations. "
             'Do not provide any final answer to the question. Focus only on extracting the causal structure. Output strictly in JSON format: {"causal_relation": "A → B; C → D; ..."}.\n'
         )
     elif prompt_name == "causal_integration_prompt":
         return (
             "\nYou are an expert in causal reasoning. "
             'Given the following problem description and question, and optionally a list of causal links, '
-            'If no causal links are provided, first identify all relevant variables and their direct causal links as "A → B" (meaning A directly causes B). '
-            "Examine the causal links to ensure logical consistency: remove duplicate, redundant, or self-referential relations (e.g., both 'A → B' and 'B → A', or 'A → A')."
-            "Then, synthesize these causal links into concise, natural-language statements, summarizing how one variable causally influence another."
+            # 'If no causal links are provided, first identify all relevant variables and their direct causal links as "A → B" (meaning A directly causes B). '
+            # "Examine the causal links to ensure logical consistency: remove duplicate, redundant, or self-referential relations (e.g., both 'A → B' and 'B → A', or 'A → A')."
+            # "Then, synthesize these causal links into concise, natural-language statements, summarizing how one variable causally influence another."
+            '1. Verify that all mechanistic (factual, explanatory) causal relations (e.g., "A → B") are included; if any are missing, add them.\n'
+            "2. Remove any contradictory, redundant, or spurious links that are not logically or factually supported.\n"
+            "3. Synthesize the minimal verified relations into concise natural-language statements describing true causal mechanisms.\n"
             "Use as few sentences as needed to maintain clarity. "
             'Do not provide any final answer to the question. Output strictly in JSON format: {"causal_relation": "<concise natural-language causal description>"}.\n'
         )
@@ -243,6 +252,8 @@ def prepare_input(example, prompting_method, dataset_name):
         answer_format = '{"answer": 1} or {"answer": 2}'
     elif dataset_name == "cola":
         answer_format = '{"answer": [event_numbers in order]}. List event numbers in order. (If there is only one cause, still respond as a list)'        
+    elif dataset_name == "medmcqa":
+        answer_format = '{"answer": 1} or {"answer": 2} or {"answer": 3} or {"answer": 4}'
     else:
         answer_format = ''
         
