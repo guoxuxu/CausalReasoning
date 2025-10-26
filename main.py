@@ -9,6 +9,7 @@ from datasets import Dataset, load_from_disk
 from collections import Counter
 import json
 import os
+from openai import OpenAI
 
 
 def test_generation(prompt, model, tokenizer, args, num_return_sequences=1):
@@ -169,7 +170,7 @@ def majority_voting(answers):
 
 
 if __name__ == "__main__":
-    from utils.model_utils import parse_args, load_model, setup_logging
+    from utils.model_utils import parse_args, load_model, setup_logging, get_api_key, call_openai_model
     from utils.data_utils import load_data, create_save_path, prepare_input, get_prompt, sample_subset
     from transformers import set_seed
     
@@ -183,8 +184,12 @@ if __name__ == "__main__":
     dataset_name = args.dataset_name
     dataset = load_data(DATA_PATH=Path("Data"), dataset_name=dataset_name, data_split=args.data_split)
     # dataset = sample_subset(dataset, n_per_class=500)
-    # dataset = dataset.select(range(5))
-    model, tokenizer = load_model(args.data_model)
+    dataset = dataset.select(range(5))
+    if args.call_gpt:
+        model = OpenAI(api_key=get_api_key())
+        tokenizer = None
+    else:
+        model, tokenizer = load_model(args.data_model)
     
     
     def _generate_causal_map(d, model, tokenizer, args, causal_data_path, prompt_key="causal_map_prompt", map_key="causal_map", given_ids=None):
@@ -196,9 +201,22 @@ if __name__ == "__main__":
         for example in tqdm(d, desc="Generating causal maps"):
             max_try = 5
             causal_map = ""
+            cost = None
+            total_toks = None
             for attempt in range(max_try):
                 try:
-                    outs = test_generation(prompt + "\n\n" + example.get("Problem"), model, tokenizer, args, num_return_sequences=1)
+                    model_input = prompt + "\n\n" + example.get("Problem")
+                    if args.call_gpt:
+                        outs, cost, total_toks = call_openai_model(
+                            model_input,
+                            model,
+                            model_name=args.data_model,
+                            temperature=args.temperature,
+                            max_tokens=args.max_new_tokens,
+                            num_return_sequences=1,
+                        )
+                    else:
+                        outs = test_generation(model_input, model, tokenizer, args, num_return_sequences=1)
                     if outs:
                         causal_map = extract_causal_relation(outs[0]) or ""
                     if causal_map:
@@ -215,6 +233,11 @@ if __name__ == "__main__":
                 f"{prompt_key}": prompt,
                 f"{map_key}": causal_map,
             }
+            if cost:
+                data["cost_causal_map"] = cost
+            if total_toks:
+                data["total_tokens_causal_map"] = total_toks
+            
             with open(json_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
                 
@@ -231,22 +254,54 @@ if __name__ == "__main__":
             with open(json_path, "r", encoding="utf-8") as f:
                 causal_data = json.load(f)
             causal_map = str(causal_data.get("causal_map", ""))
-            try:
-                outs = test_generation(prompt + "\n\n" + example.get("Problem") + "\n\n" + causal_map, model, tokenizer, args, num_return_sequences=1)
-                statement = extract_causal_relation(outs[0]) if outs else ""
-            except Exception:
-                statement = ""
+            max_try = 5
+            statement = ""
+            cost, total_toks = None, None
+            for attempt in range(max_try):
+                try:
+                    model_input = prompt + "\n\n" + example.get("Problem") + "\n\n" + causal_map
+                    if args.call_gpt:
+                        outs, cost, total_toks = call_openai_model(
+                            model_input,
+                            model,
+                            model_name=args.data_model,
+                            temperature=args.temperature,
+                            max_tokens=args.max_new_tokens,
+                            num_return_sequences=1,
+                        )
+                    else:
+                        outs = test_generation(model_input, model, tokenizer, args, num_return_sequences=1)
+                    if outs:
+                        statement = extract_causal_relation(outs[0]) if outs else ""
+                    if statement:
+                        break
+                except Exception:
+                    continue
             
             causal_data[prompt_key] = prompt
             causal_data[f"{map_key}_integration"] = statement
+            if cost:
+                causal_data["cost_integration"] = cost
+            if total_toks:
+                causal_data["total_tokens_integration"] = total_toks
             
             with open(json_path, "w", encoding="utf-8") as f:
                 json.dump(causal_data, f, ensure_ascii=False, indent=2)
                 
     
     def _generate_answers(prompt, model, tokenizer, args, causal_data_path, data_save_path):
-        
-        model_outputs = test_generation(prompt, model, tokenizer, args)
+        cost, total_toks = None, None
+        if args.call_gpt:
+            model_outputs, cost, total_toks = call_openai_model(
+                prompt,
+                model,
+                model_name=args.data_model,
+                temperature=args.temperature,
+                max_tokens=args.max_new_tokens,
+                num_return_sequences=args.num_return_sequences,
+            )
+        else:
+            model_outputs = test_generation(prompt, model, tokenizer, args)
         
         valid_model_outputs = []
         model_answers = []
@@ -268,7 +323,8 @@ if __name__ == "__main__":
                 final_answer = model_answers[0]
         else:
             final_answer = None
-        return valid_model_outputs, model_answers, final_answer
+        
+        return valid_model_outputs, model_answers, final_answer, cost, total_toks
         
     
     def _check_causal_map_files(dataset, causal_data_path: Path, overwrite=False):
@@ -285,7 +341,7 @@ if __name__ == "__main__":
     
     
     causal_data_path = create_save_path(Path("Causal_Map_1"), args)
-    causal_map_missing_ids = _check_causal_map_files(dataset, causal_data_path, overwrite=False)
+    causal_map_missing_ids = _check_causal_map_files(dataset, causal_data_path, overwrite=True)
     
     if causal_map_missing_ids:
         start_time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
@@ -344,7 +400,7 @@ if __name__ == "__main__":
         
         for method, prompt in _generate_answers_args:
                 
-            valid_model_outputs, model_answers, final_answer = _generate_answers(prompt, model, tokenizer, args, causal_data_path, data_save_path)
+            valid_model_outputs, model_answers, final_answer, cost, total_toks = _generate_answers(prompt, model, tokenizer, args, causal_data_path, data_save_path)
             is_acc = (final_answer is not None) and (str(final_answer).lower() == str(ground_truth).lower().strip(""))
             
             results.update({
@@ -353,6 +409,10 @@ if __name__ == "__main__":
                 f"{method}_final_ans": final_answer,
                 f"{method}_is_acc": is_acc,
             })
+            if cost:
+                results[f"{method}_cost"] = cost
+            if total_toks:
+                results[f"{method}_total_tokens"] = total_toks
             if is_acc:
                 correct_by_method[method] += 1
             

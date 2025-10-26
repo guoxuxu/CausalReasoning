@@ -4,6 +4,9 @@ import logging
 from pathlib import Path
 from typing import Tuple
 from transformers import AutoTokenizer, AutoModelForCausalLM
+from dotenv import load_dotenv
+load_dotenv()
+import os
 
 
 SUPPORTED_MODELS = {
@@ -12,8 +15,66 @@ SUPPORTED_MODELS = {
     "qwen2.5-7b-instruct": "Qwen2.5-7B-Instruct",
     "qwen2.5-32b": "Qwen2.5-32B",
     "llama3.1-8b-instruct": "llama3.1-8b-instruct",
+    "gpt-4o-mini": "gpt-4o-mini",
+    "gpt-4o": "gpt-4o",
+    "o1-mini": "o1-mini",
+    "o1": "o1",
 }
 WEIGHTS_ROOT = Path("/mnt/hdd/weights")
+
+
+def get_api_key():
+    return os.getenv("OPENAI_API_KEY")
+
+
+def call_openai_model(
+    prompt,
+    client,
+    model_name="gpt-4o-mini",
+    temperature=0.7,
+    max_tokens=512,
+    num_return_sequences=1,
+):
+    # price per 1M tokens in USD
+    # https://platform.openai.com/docs/pricing
+    MODEL_PRICES = {
+        "gpt-4o-mini": {"input": 0.15, "output": 0.60},
+        "gpt-4o": {"input": 2.50, "output": 10.00},
+        "o1-mini": {"input": 1.10, "output": 4.40},
+        "o1": {"input": 15.00, "output": 60.00},
+    }
+    
+    try:
+        response = client.chat.completions.create(
+            model=model_name,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=temperature,
+            max_tokens=max_tokens,
+            n=num_return_sequences, 
+        )
+        
+        outputs = [choice.message.content for choice in response.choices]
+        
+        usage = response.usage
+        prompt_toks = usage.prompt_tokens
+        completion_toks = usage.completion_tokens
+        total_toks = usage.total_tokens
+        if model_name in MODEL_PRICES:
+            price_info = MODEL_PRICES[model_name]
+            cost = (
+                (prompt_toks / 1000000) * price_info["input"]
+                + (completion_toks / 1000000) * price_info["output"]
+            )
+        else:
+            cost = None
+        
+        return outputs, cost, total_toks
+        
+    except Exception as e:
+        print(f"Error calling {model_name}: {e}")
+        return [""], 0.0
+    
+    
 
 def setup_logging(level: int = logging.INFO) -> None:
     logging.basicConfig(
@@ -78,6 +139,8 @@ def parse_args():
     parser.add_argument('--temperature', type=float, default=0.7)
     parser.add_argument('--max_new_tokens', type=int, default=2048)
     parser.add_argument('--num_return_sequences', type=int, default=1)
+    # call_gpt, store true
+    parser.add_argument('--call_gpt', action='store_true')
     args = parser.parse_args()
     return args
 
