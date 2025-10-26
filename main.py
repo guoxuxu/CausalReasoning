@@ -184,7 +184,7 @@ if __name__ == "__main__":
     dataset_name = args.dataset_name
     dataset = load_data(DATA_PATH=Path("Data"), dataset_name=dataset_name, data_split=args.data_split)
     # dataset = sample_subset(dataset, n_per_class=500)
-    dataset = dataset.select(range(5))
+    # dataset = dataset.select(range(5))
     if args.call_gpt:
         model = OpenAI(api_key=get_api_key())
         tokenizer = None
@@ -199,7 +199,10 @@ if __name__ == "__main__":
             
         prompt = get_prompt(prompt_key)
         for example in tqdm(d, desc="Generating causal maps"):
-            max_try = 5
+            if args.call_gpt:
+                max_try = 1
+            else:
+                max_try = 5
             causal_map = ""
             cost = None
             total_toks = None
@@ -254,7 +257,10 @@ if __name__ == "__main__":
             with open(json_path, "r", encoding="utf-8") as f:
                 causal_data = json.load(f)
             causal_map = str(causal_data.get("causal_map", ""))
-            max_try = 5
+            if args.call_gpt:
+                max_try = 1
+            else:
+                max_try = 5
             statement = ""
             cost, total_toks = None, None
             for attempt in range(max_try):

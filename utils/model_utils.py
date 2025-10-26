@@ -17,6 +17,7 @@ SUPPORTED_MODELS = {
     "llama3.1-8b-instruct": "llama3.1-8b-instruct",
     "gpt-4o-mini": "gpt-4o-mini",
     "gpt-4o": "gpt-4o",
+    "gpt-5": "gpt-5",
     "o1-mini": "o1-mini",
     "o1": "o1",
 }
@@ -42,16 +43,26 @@ def call_openai_model(
         "gpt-4o": {"input": 2.50, "output": 10.00},
         "o1-mini": {"input": 1.10, "output": 4.40},
         "o1": {"input": 15.00, "output": 60.00},
+        "gpt-5": {"input": 1.25, "output": 10.00},
     }
     
     try:
-        response = client.chat.completions.create(
-            model=model_name,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=temperature,
-            max_tokens=max_tokens,
-            n=num_return_sequences, 
-        )
+        if model_name == 'gpt-5':
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[{"role": "user", "content": prompt}],
+                max_completion_tokens=max_tokens,
+                n=num_return_sequences, 
+            )
+        else:
+            
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=temperature,
+                max_tokens=max_tokens,
+                n=num_return_sequences, 
+            )
         
         outputs = [choice.message.content for choice in response.choices]
         

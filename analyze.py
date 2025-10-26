@@ -51,7 +51,11 @@ if __name__ == "__main__":
                 if question_type in valid_types:
                     correct_by_method_qtyep[method][question_type] += 1
         for method in evaluation_methods:
-            pass_1_ans = results.get(f"{method}_answers")[0].lower().strip()
+            try:
+                pass_1_ans = results.get(f"{method}_answers")[0].lower().strip()
+            except:
+                pass_1_ans = None
+            
             is_acc = (pass_1_ans is not None) and (pass_1_ans == ground_truth)
             if is_acc:
                 pass_1_correct_by_method[method] += 1
