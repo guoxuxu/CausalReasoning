@@ -40,13 +40,17 @@ Effect → Cause (with intervention)
 
 ## 3. Reproduction
 
-├── analysis.py              # Main script for calculting results of each method
+### Project Structure
+
+```text
+├── analysis.py              # Main script for calculating results of each method
 ├── Map/                     # Synthesized causal maps
 ├── Results/                 # Directory to store experiment outputs, logs, and accuracy reports
 ├── utils/                   # Utility scripts for parsing model outputs and computing metrics
 ├── requirements.txt         # Python dependencies
 ├── README.md                # Project documentation
 └── Data/                    # Local cache for downloaded datasets
+
 
 
 ```
