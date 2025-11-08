@@ -1,8 +1,5 @@
 # When Chain-of-Thought Falls Short: Enhancing LLM Causal Reasoning via Self-Synthesized Causal Maps
 
-This repository contains the official implementation of the paper  
-**"When Chain-of-Thought Falls Short: Enhancing LLM Causal Reasoning via Self-Synthesized Causal Maps."**
-
 The project investigates the limitations of **Chain-of-Thought (CoT)** reasoning in causal inference tasks and proposes a new **test-time structural prompting framework** that enables large language models (LLMs) to generate **self-synthesized causal maps** before reasoning.  
 Experiments on **CausalBench** (covering code and mathematical causal reasoning) demonstrate that this approach significantly improves accuracy and interpretability compared to standard CoT and Self-Consistency methods.
 
