@@ -81,58 +81,6 @@ def extract_causal_relation(text):
     return m.group(1).strip()
 
 
-def extract_list(text):
-    if not isinstance(text, str):
-        return []
-    s = text.strip()
-    try:
-        obj = json.loads(s)
-        if isinstance(obj, dict) and "answer" in obj:
-            val = obj["answer"]
-            if isinstance(val, list):
-                return sorted(val)
-            elif isinstance(val, (int, float, str)):
-                return sorted([int(val)])
-    except Exception:
-        pass
-    pattern = re.compile(r'"\s*answer\s*"\s*:\s*(\[[^\]]*\])', re.IGNORECASE)
-    m = pattern.search(s)
-    if m:
-        try:
-            val = json.loads(m.group(1))
-            if isinstance(val, list):
-                return sorted(val)
-        except Exception:
-            pass
-    
-    m = re.search(r'\b\d+\b', s)
-    if m:
-        return [int(m.group(0))]
-    return []
-    
-
-def extract_option(text):
-    if not isinstance(text, str):
-        return None
-    s = text.strip()
-    try:
-        obj = json.loads(s)
-        ans = obj.get("answer", None)
-        if ans is not None:
-            return str(ans).strip()
-    except Exception:
-        pass
-    
-    pattern = re.compile(
-        r'"\s*answer\s*"\s*:\s*"?([^"\s,}]+)"?',  # the value of answer can be with or without quotes
-        re.IGNORECASE
-    )
-    m = pattern.search(s)
-    if m:
-        return m.group(1)
-    return None
-
-
 def extract_answer(text):
     if not isinstance(text, str):
         return None
@@ -159,7 +107,7 @@ def extract_answer(text):
 
 
 def majority_voting(answers):
-    answers = [a.strip().lower() for a in answers if a]
+    answers = [str(a).strip().lower() for a in answers if a]
     counts = Counter(answers)
     max_count = max(counts.values())
     candidates = [a for a, c in counts.items() if c == max_count]
@@ -189,7 +137,7 @@ if __name__ == "__main__":
         model = OpenAI(api_key=get_api_key())
         tokenizer = None
     else:
-        model, tokenizer = load_model(args.data_model)
+        model, tokenizer = load_model(args.answer_model)
     
     
     def _generate_causal_map(d, model, tokenizer, args, causal_data_path, prompt_key="causal_map_prompt", map_key="causal_map", given_ids=None):
@@ -197,8 +145,10 @@ if __name__ == "__main__":
             given_ids = set(given_ids)
             d = d.filter(lambda ex: ex["ID"] in given_ids)
             
-        prompt = get_prompt(prompt_key)
+        prompt = get_prompt(prompt_key, args.dataset_name)
         for example in tqdm(d, desc="Generating causal maps"):
+            ex_id = example.get("ID")
+                
             if args.call_gpt:
                 max_try = 1
             else:
@@ -213,7 +163,7 @@ if __name__ == "__main__":
                         outs, cost, total_toks = call_openai_model(
                             model_input,
                             model,
-                            model_name=args.data_model,
+                            model_name=args.probe_model,
                             temperature=args.temperature,
                             max_tokens=args.max_new_tokens,
                             num_return_sequences=1,
@@ -227,8 +177,6 @@ if __name__ == "__main__":
                 except Exception as e:
                     continue
                 
-            ex_id = example.get("ID")
-            json_path = causal_data_path / f"{ex_id}.json"
             data = {
                 "ID": ex_id,
                 "Problem": example.get("Problem"),
@@ -240,9 +188,10 @@ if __name__ == "__main__":
                 data["cost_causal_map"] = cost
             if total_toks:
                 data["total_tokens_causal_map"] = total_toks
-            
-            with open(json_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+                
+            json_path = causal_data_path / f"{ex_id}.json"
+            with open(json_path, "w", encoding="utf-8", errors='ignore') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2, skipkeys=True)
                 
     
     def _integrate_causal_map(d, model, tokenizer, args, causal_data_path, prompt_key="causal_integration_prompt", map_key="causal_map", given_ids=None):
@@ -250,7 +199,7 @@ if __name__ == "__main__":
             given_ids = set(given_ids)
             d = d.filter(lambda ex: ex["ID"] in given_ids)
             
-        prompt = get_prompt(prompt_key)
+        prompt = get_prompt(prompt_key, args.dataset_name)
         for example in tqdm(d, desc="Integrating causal map -> statement"):
             ex_id = example.get("ID")
             json_path = causal_data_path / f"{ex_id}.json"
@@ -270,7 +219,7 @@ if __name__ == "__main__":
                         outs, cost, total_toks = call_openai_model(
                             model_input,
                             model,
-                            model_name=args.data_model,
+                            model_name=args.probe_model,
                             temperature=args.temperature,
                             max_tokens=args.max_new_tokens,
                             num_return_sequences=1,
@@ -291,8 +240,8 @@ if __name__ == "__main__":
             if total_toks:
                 causal_data["total_tokens_integration"] = total_toks
             
-            with open(json_path, "w", encoding="utf-8") as f:
-                json.dump(causal_data, f, ensure_ascii=False, indent=2)
+            with open(json_path, "w", encoding="utf-8", errors='ignore') as f:
+                json.dump(causal_data, f, ensure_ascii=False, indent=2, skipkeys=True)
                 
     
     def _generate_answers(prompt, model, tokenizer, args, causal_data_path, data_save_path):
@@ -301,7 +250,7 @@ if __name__ == "__main__":
             model_outputs, cost, total_toks = call_openai_model(
                 prompt,
                 model,
-                model_name=args.data_model,
+                model_name=args.answer_model,
                 temperature=args.temperature,
                 max_tokens=args.max_new_tokens,
                 num_return_sequences=args.num_return_sequences,
@@ -312,13 +261,7 @@ if __name__ == "__main__":
         valid_model_outputs = []
         model_answers = []
         for text in model_outputs:
-            if args.dataset_name in ['e_care', "medmcqa"]:
-                answer = extract_option(text)
-            elif args.dataset_name == 'cola':    
-                answer = extract_list(text)
-                answer = str(answer[0]) if answer else None
-            else:
-                answer = extract_answer(text)
+            answer = extract_answer(text)
             if answer is not None:  
                 valid_model_outputs.append(text)
                 model_answers.append(answer)
@@ -333,7 +276,7 @@ if __name__ == "__main__":
         return valid_model_outputs, model_answers, final_answer, cost, total_toks
         
     
-    def _check_causal_map_files(dataset, causal_data_path: Path, overwrite=False):
+    def _check_causal_map_files(dataset, causal_data_path: Path, attribute_name:str, overwrite=False):
         missing_ids = []
         for ex in tqdm(dataset, desc="Checking causal map files"):
             ex_id = ex.get("ID")
@@ -343,63 +286,78 @@ if __name__ == "__main__":
             json_path = causal_data_path / f"{ex_id}.json"
             if not json_path.exists():
                 missing_ids.append(ex_id)
+            else:
+                with open(json_path, "r", encoding="utf-8") as f:
+                    causal_data = json.load(f)
+                if causal_data.get(attribute_name, ""):
+                    continue
+                else:
+                    missing_ids.append(ex_id)
         return missing_ids
     
     
-    causal_data_path = create_save_path(Path("Causal_Map_1"), args)
-    causal_map_missing_ids = _check_causal_map_files(dataset, causal_data_path, overwrite=True)
-    
-    if causal_map_missing_ids:
-        start_time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-        logging.info(f"{start_time_str}: {args.data_model} Generating Causal Maps for {len(causal_map_missing_ids)} examples ...")
+    causal_data_path = create_save_path(Path(args.map_path), args.probe_model, args)
+    if args.generate_map:
+        causal_map_missing_ids = _check_causal_map_files(dataset, causal_data_path, attribute_name="causal_map", overwrite=args.overwrite)
+        if causal_map_missing_ids:
+            start_time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+            logging.info(f"{start_time_str}: {args.probe_model} Generating Causal Maps for {len(causal_map_missing_ids)} examples ...")
+            _generate_causal_map(dataset, model, tokenizer, args, causal_data_path, prompt_key="causal_map_prompt", map_key="causal_map", given_ids=causal_map_missing_ids)
         
-        _generate_causal_map(dataset, model, tokenizer, args, causal_data_path, prompt_key="causal_map_prompt", map_key="causal_map", given_ids=causal_map_missing_ids)
-        _integrate_causal_map(dataset, model, tokenizer, args, causal_data_path, prompt_key="causal_integration_prompt", map_key="causal_map", given_ids=causal_map_missing_ids)
+    if args.integrate_map:
+        causal_map_missing_ids = _check_causal_map_files(dataset, causal_data_path, attribute_name="causal_map_integration", overwrite=args.overwrite)
+        if causal_map_missing_ids:
+            start_time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+            logging.info(f"{start_time_str}: {args.probe_model} Integrating Causal Maps for {len(causal_map_missing_ids)} examples ...")
+            _integrate_causal_map(dataset, model, tokenizer, args, causal_data_path, prompt_key="causal_integration_prompt", map_key="causal_map", given_ids=causal_map_missing_ids)
 
     
     # Evaluation: Generate Answers
-    data_save_path = create_save_path(Path("Results/Causal_Map_1"), args)
+    data_save_path = create_save_path(Path(args.results_path), args.answer_model, args)
     start_time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-    logging.info(f"{start_time_str}: {args.data_model} Generating Answer ...")
-
-    evaluation_methods = ["zs", 
-                            "zs_cot", 
-                            "zs_causal", 
-                            "zs_causal_Inte"]
-    if dataset_name != "cola":
-        evaluation_methods += [
-            "zs_Explanation", 
-        ]
+    logging.info(f"{start_time_str}: {args.answer_model} Generating Answer ...")
+    
+    evaluation_methods = [
+        "zs", "zs_cot", "zs_causal", "zs_causal_Inte", "zs_Explanation", 
+    ]
     
     correct_by_method = {m: 0 for m in evaluation_methods}
 
     for example in tqdm(dataset, desc="Evaluating"):
         ex_id = example.get("ID")
         ground_truth = example["Ground Truth"]
-        
-        json_path = causal_data_path / f"{ex_id}.json"
-        with open(json_path, "r", encoding="utf-8") as f:
-            causal_data = json.load(f)
-        
-        causal_map = str(causal_data.get("causal_map", ""))
-        causal_map_integration = str(causal_data.get("causal_map_integration", ""))
-        example.update({
-            "causal_map": causal_map,
-            "causal_map_integration": causal_map_integration,
-        })
-        
-        results = {
-            "ID": ex_id,
-            "Problem": example.get("Problem"),
-            'Question Type': example.get("Question Type"),
-            "Ground Truth": ground_truth,
-            "causal_map": causal_map,
-            "causal_map_integration": causal_map_integration,
-        }
-        if dataset_name != "cola":
-            results.update({
-                "Explanation": example.get("Explanation"),
+        output_file = data_save_path / f"{ex_id}.json"
+        # check if already exists
+        if os.path.isfile(output_file) and os.path.getsize(output_file) > 0:
+            # check is not null
+            with open(output_file, 'r', encoding='utf-8') as f:
+                results = json.load(f)
+        else:    
+            results = {
+                "ID": ex_id,
+                "Problem": example.get("Problem"),
+                'Question Type': example.get("Question Type"),
+                "Ground Truth": ground_truth,
+            }
+        if args.use_map:
+            json_path = causal_data_path / f"{ex_id}.json"
+            with open(json_path, "r", encoding="utf-8") as f:
+                causal_data = json.load(f)
+            
+            causal_map = str(causal_data.get("causal_map", ""))
+            causal_map_integration = str(causal_data.get("causal_map_integration", ""))
+            example.update({
+                "causal_map": causal_map,
+                "causal_map_integration": causal_map_integration,
             })
+            results.update({
+                "causal_map": causal_map,
+                "causal_map_integration": causal_map_integration,
+            })
+        
+        results.update({
+            "Explanation": example.get("Explanation"),
+        })
         
         prompts = {m: prepare_input(example, m, dataset_name) for m in evaluation_methods}
         _generate_answers_args = [(m, prompts[m]) for m in evaluation_methods]
@@ -410,6 +368,7 @@ if __name__ == "__main__":
             is_acc = (final_answer is not None) and (str(final_answer).lower() == str(ground_truth).lower().strip(""))
             
             results.update({
+                f"{method}_prompt": prompt,
                 f"{method}_outputs": valid_model_outputs,
                 f"{method}_answers": model_answers,
                 f"{method}_final_ans": final_answer,
@@ -422,10 +381,9 @@ if __name__ == "__main__":
             if is_acc:
                 correct_by_method[method] += 1
             
-        output_file = data_save_path / f"{ex_id}.json"
         with open(output_file, 'w', encoding='utf-8') as f:
             json.dump(results, f, ensure_ascii=False, indent=2)
-    
+
     N = len(dataset)
     for m, c in correct_by_method.items():
         logging.info(f"{m} Accuracy: {c / N:.2f}")

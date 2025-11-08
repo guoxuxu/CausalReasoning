@@ -7,6 +7,7 @@ from datasets import Dataset, DatasetDict
 import random
 from tqdm import tqdm
 import json
+from datasets import concatenate_datasets
 
 
 def load_data(DATA_PATH, dataset_name, data_split):
@@ -25,170 +26,25 @@ def load_data(DATA_PATH, dataset_name, data_split):
         dataset = dataset.map(
             lambda example: {"Problem": example.get("Mathematical Scenario") + "\n\n" + example.get("Question")}
         )
-        
-    elif dataset_name == 'causal_text':
-        dataset = load_dataset("csv", data_files=os.path.join(DATA_PATH, "CausalBench/CausalBench_Text_Part.csv"))
-        dataset = dataset.rename_column("Scenario ID", "ID")
-        dataset = dataset.rename_column("Scenario and Question", "Problem")
+    else:
+        raise NotImplementedError
     
-    elif dataset_name == 'medmcqa':
-        dataset = load_dataset("openlifescienceai/medmcqa")
-        dataset["dev"] = dataset["validation"]
-        dataset = dataset[data_split]
-        filtered = dataset.map(
-            lambda example: {"Problem": f"{example.get('question')}\n\n" +
-                             f"Option 1: {example.get('opa')}\nOption 2: {example.get('opb')}\nOption 3: {example.get('opc')}\nOption 4: {example.get('opd')}\n\n" +
-                             "Choose the one correct option."}
-        )
-        filtered = filtered.filter(lambda x: x["exp"] is not None)
-        filtered = filtered.rename_column("exp", "Explanation")
-        filtered = filtered.map(lambda ex: {"Ground Truth": int(ex["cop"]) + 1})
-        filtered = filtered.rename_column("subject_name", "Question Type")
-        filtered = filtered.map(
-            lambda example, idx: {"ID": idx + 1}, with_indices=True
-        )
-
-    elif dataset_name == 'cola':
-        dataset = load_dataset("json", data_files=os.path.join(DATA_PATH, "COLA/COPES.json"))
-        # filter res_idx is not integer and is null and is less than 0
-        dataset = dataset.filter(lambda x: isinstance(x["res_idx"], int) and x["res_idx"] >= 0)
-        dataset = dataset.map(
-            lambda example: {"Effect": example.get("story")[example.get("res_idx")]}
-        )
-        # filter rows where cause_idx is not list and is null list
-        dataset = dataset.filter(lambda x: isinstance(x["cause_idx"], list) and len(x["cause_idx"]) > 0)
-        dataset = dataset.map(
-            lambda example: {"Ground Truth": example.get("cause_idx")}
-        )
-        dataset = dataset.map(
-            lambda example: {"Problem": "\n".join([f"Event {i+1}: {s}" for i, s in enumerate(example["story"])])}
-        )
-        dataset = dataset.map(
-            lambda example: {"Problem": example.get("Problem") + f"\n\nEffect: {example.get('Effect')}\n\n" + "Which of the events have a **direct causal link** to the effect? "}
-        )
-        # add ID column
-        filtered = dataset[data_split]
-        filtered = filtered.map(
-            lambda example, idx: {"ID": idx + 1}, with_indices=True
-        )
-    
-    elif dataset_name == 'copa':
-        dataset = load_dataset(
-            "json",
-            data_files={
-                "train": str(DATA_PATH / "COPA/train.jsonl"),
-                "dev":   str(DATA_PATH / "COPA/val.jsonl"),
-            }
-        )
-        for split in dataset.keys():
-            ds = dataset[split]
-            ds = ds.map(lambda ex: {"label": int(ex["label"]) + 1})
-            ds = ds.rename_column("label", "Ground Truth")
-            ds = ds.rename_column("idx", "ID")
-            dataset[split] = ds
-        
-        # merge train and dev into one dataset called test
-        dataset = DatasetDict({
-            "train": Dataset.from_dict({key: sum([dataset[split][key] for split in dataset.keys()], []) 
-                                   for key in dataset[list(dataset.keys())[0]].column_names})
-        })
-        assert data_split == 'train'
-        filtered = dataset[data_split]
-        filtered = filtered.map(
-            lambda example: {
-                "Problem": (
-                    f"Given the premise - {example.get('premise')}\n\n"
-                    f"Two possible hypotheses are proposed:\n"
-                    f"Hypothesis 1: {example.get('choice1')}\n"
-                    f"Hypothesis 2: {example.get('choice2')}\n"
-                    f"{example.get('question')}"
-                )
-            }
-        )
-        yes_count = sum(1 for x in filtered if x["Ground Truth"] == 1)
-        no_count = sum(1 for x in filtered if x["Ground Truth"] == 2)
-        print(f"Ground Truth == 1: {yes_count}")
-        print(f"Ground Truth == 2 : {no_count}")
-        
-        
-    elif dataset_name == 'e_care':
-        cr_dataset = load_dataset(
-            "json",
-            data_files={
-                "train": str(DATA_PATH / "e-CARE/dataset/Causal_Reasoning/train.jsonl"),
-                "dev":   str(DATA_PATH / "e-CARE/dataset/Causal_Reasoning/dev.jsonl"),
-            }
-        )
-        def _read_jsonl(path: Path):
-            with open(path, "r", encoding="utf-8") as f:
-                return [json.loads(line) for line in f]
-        def _norm_id(v):
-            try:
-                return int(v)
-            except Exception:
-                return str(v)
-        
-        train_explain_data = _read_jsonl(DATA_PATH / "e-CARE/dataset/Explanation_Generation/train.jsonl")
-        dev_explain_data   = _read_jsonl(DATA_PATH / "e-CARE/dataset/Explanation_Generation/dev.jsonl")
-
-        train_explanation_map = {}
-        for example in train_explain_data:
-            ex_id = _norm_id(example.get("index"))
-            train_explanation_map[ex_id] = example.get("conceptual_explanation", "")
-        dev_explanation_map = {}
-        for example in dev_explain_data:
-            ex_id = _norm_id(example.get("index"))
-            dev_explanation_map[ex_id] = example.get("conceptual_explanation", "")
-
-        # sort by index to align
-        for split, exp_map in (("train", train_explanation_map), ("dev", dev_explanation_map)):
-            ds = cr_dataset[split]
-            explanations = []
-            for row in ds:
-                ex_id = _norm_id(row.get("index"))
-                explanations.append(exp_map.get(ex_id, ""))
-            
-            ds = ds.add_column("Explanation", explanations)
-            ds = ds.map(lambda ex: {"label": int(ex["label"]) + 1})
-            ds = ds.rename_column("index", "ID")
-            ds = ds.rename_column("label", "Ground Truth")  
-            cr_dataset[split] = ds
-    
-        filtered = cr_dataset[data_split]
-        filtered = filtered.map(
-            lambda example: {
-                "Problem": (
-                    f"Determine the {example.get('ask-for')} of the premise - {example.get('premise')}\n\n"
-                    f"Two possible hypotheses are proposed:\n"
-                    f"Hypothesis 1: {example.get('hypothesis1')}\n"
-                    f"Hypothesis 2: {example.get('hypothesis2')}\n"
-                    "Which hypothesis most accurately reflects the causal relation implied by the premise?"
-                )
-            }
-        )
-        yes_count = sum(1 for x in filtered if x["Ground Truth"] == 1)
-        no_count = sum(1 for x in filtered if x["Ground Truth"] == 2)
-        print(f"Ground Truth == 1: {yes_count}")
-        print(f"Ground Truth == 2 : {no_count}")
-    
-    
-    if "causal" in dataset_name:
-        dataset = dataset[data_split]
-        filtered = dataset.filter(lambda x: x["Ground Truth"] in ["Yes", "No"])
-        filtered = filtered.map(lambda x: {"Question Type": x["Question Type"].lower() if isinstance(x["Question Type"], str) else x["Question Type"]})
-        valid_types = [
-            'from effect to cause without intervention',
-            'from effect to cause with intervention',
-            'from cause to effect with intervention',
-            'from cause to effect without intervention'
-        ]
-        filtered = filtered.filter(lambda x: x["Question Type"] in valid_types)
-        yes_count = sum(1 for x in filtered if x["Ground Truth"] == "Yes")
-        no_count = sum(1 for x in filtered if x["Ground Truth"] == "No")
-        print(f"Ground Truth == 'Yes': {yes_count}")
-        print(f"Ground Truth == 'No' : {no_count}")
-        print(Counter(filtered['Question Type']))
-        filtered = filtered.map(lambda example, idx: {"ID": idx + 1}, with_indices=True)
+    dataset = dataset[data_split]
+    filtered = dataset.filter(lambda x: x["Ground Truth"] in ["Yes", "No"])
+    filtered = filtered.map(lambda x: {"Question Type": x["Question Type"].lower() if isinstance(x["Question Type"], str) else x["Question Type"]})
+    valid_types = [
+        'from effect to cause without intervention',
+        'from effect to cause with intervention',
+        'from cause to effect with intervention',
+        'from cause to effect without intervention'
+    ]
+    filtered = filtered.filter(lambda x: x["Question Type"] in valid_types)
+    yes_count = sum(1 for x in filtered if x["Ground Truth"] == "Yes")
+    no_count = sum(1 for x in filtered if x["Ground Truth"] == "No")
+    print(f"Ground Truth == 'Yes': {yes_count}")
+    print(f"Ground Truth == 'No' : {no_count}")
+    print(Counter(filtered['Question Type']))
+    filtered = filtered.map(lambda example, idx: {"ID": idx + 1}, with_indices=True)
     return filtered
 
 
@@ -214,48 +70,55 @@ def sample_subset(dataset, n_per_class=500):
     return final_dataset
 
 
-def get_prompt(prompt_name: str) -> str:
+def get_prompt(prompt_name: str, dataset_name: str) -> str:
     if prompt_name == "causal_map_prompt":
-        return (
-            "\nYou are an expert in causal reasoning. "
-            # 'Given the following problem description and question, identify all relevant variables and describe their direct causal relationships.'
-            # 'Your output should be a clear causal map in textual form, listing directed causal links as "A → B" (meaning A directly causes B).'
-            # "Avoid redundancy or duplicate links. List only distinct and meaningful causal relations. "
-            'Given the following problem description and question, identify only **mechanistic causal relationships** - '
-            'that is, links that explain *why* one variable causes another, not merely that they co-occur or happen sequentially. '
-            'List distinct and meaningful causal links in textual form as "A → B" (meaning A directly causes B by mechanism).'
-            "Avoid redundancy, duplication, or suprious relations. "
-            'Do not provide any final answer to the question. Focus only on extracting the causal structure. Output strictly in JSON format: {"causal_relation": "A → B; C → D; ..."}.\n'
-        )
+        if dataset_name == "cola":
+            return (
+                "\nYou are an expert in causal reasoning. "
+                "Given the following short story consisting of sequential events leading to an effect, "
+                "identify all variables that are factual conditions or mechanisms that directly trigger the final effect."
+                "For each direct causal link, ensure one variable triggers another through a factual condition or mechanism."
+                'Describe the valid causal link as "A → B" (meaning A directly causes B).'
+                "Avoid duplicate, contradictory / cyclic, self-referential, or suprious links. "
+                'Your output should be a clear causal map in textual form. '
+                'Do not provide any final answer to the question. Focus only on extracting the causal structure. Output strictly in JSON format: {"causal_relation": "A → B; C → D; ..."}.\n'
+            )
+        else:
+            return (
+                "\nYou are an expert in causal reasoning. "
+                'Given the following problem description and question, identify all relevant variables and describe their direct causal relationships.'
+                'Your output should be a clear causal map in textual form, listing directed causal links as "A → B" (meaning A directly causes B).'
+                "Avoid redundancy or duplicate links. List only distinct and meaningful causal relations. "
+                'Do not provide any final answer to the question. Focus only on extracting the causal structure. Output strictly in JSON format: {"causal_relation": "A → B; C → D; ..."}.\n'
+            )
     elif prompt_name == "causal_integration_prompt":
-        return (
-            "\nYou are an expert in causal reasoning. "
-            'Given the following problem description and question, and optionally a list of causal links, '
-            # 'If no causal links are provided, first identify all relevant variables and their direct causal links as "A → B" (meaning A directly causes B). '
-            # "Examine the causal links to ensure logical consistency: remove duplicate, redundant, or self-referential relations (e.g., both 'A → B' and 'B → A', or 'A → A')."
-            # "Then, synthesize these causal links into concise, natural-language statements, summarizing how one variable causally influence another."
-            '1. Verify that all mechanistic (factual, explanatory) causal relations (e.g., "A → B") are included; if any are missing, add them.\n'
-            "2. Remove any contradictory, redundant, or spurious links that are not logically or factually supported.\n"
-            "3. Synthesize the minimal verified relations into concise natural-language statements describing true causal mechanisms.\n"
-            "Use as few sentences as needed to maintain clarity. "
-            'Do not provide any final answer to the question. Output strictly in JSON format: {"causal_relation": "<concise natural-language causal description>"}.\n'
-        )
+        if dataset_name == "cola":
+            return (
+                "\nYou are an expert in causal reasoning. "
+                'Given the following short story consisting of sequential events leading to an effect, and optionally a list of direct causal links, '
+                'If no causal links are provided, first identify all factual and mechanical causal links as "A → B" (meaning A directly causes B). '
+                "For each direct causal link, specify a short mechanistic explanation. "
+                "Then summarize the verified causal relations into concise natural-language sentences.\n"
+                "Use as few sentences as needed to maintain clarity. "
+                'Do not provide any final answer to the question. Output strictly in JSON format: {"causal_relation": "<concise natural-language causal description>"}.\n'
+            )
+        else:
+            return (
+                "\nYou are an expert in causal reasoning. "
+                'Given the following problem description and question, and optionally a list of causal links, '
+                'If no causal links are provided, first identify all relevant variables and their direct causal links as "A → B" (meaning A directly causes B). '
+                "Examine the causal links to ensure logical consistency: remove duplicate, redundant, or self-referential relations (e.g., both 'A → B' and 'B → A', or 'A → A')."
+                "Then, synthesize these causal links into concise, natural-language statements, summarizing how one variable causally influence another."
+                "Use as few sentences as needed to maintain clarity. "
+                'Do not provide any final answer to the question. Output strictly in JSON format: {"causal_relation": "<concise natural-language causal description>"}.\n'
+            )
 
 
 def prepare_input(example, prompting_method, dataset_name):
     pm = prompting_method
     
     problem = example.get("Problem")
-    if ("causal" in dataset_name):
-        answer_format = '{"answer":"Yes"} or {"answer":"No"}'
-    elif dataset_name == "e_care":
-        answer_format = '{"answer": 1} or {"answer": 2}'
-    elif dataset_name == "cola":
-        answer_format = '{"answer": [event_numbers in order]}. List event numbers in order. (If there is only one cause, still respond as a list)'        
-    elif dataset_name == "medmcqa":
-        answer_format = '{"answer": 1} or {"answer": 2} or {"answer": 3} or {"answer": 4}'
-    else:
-        answer_format = ''
+    answer_format = '{"answer":"Yes"} or {"answer":"No"}'
         
     if pm == "zs":
         # default to zero_shot
@@ -281,7 +144,6 @@ def prepare_input(example, prompting_method, dataset_name):
             f'Answer exactly in the JSON format: {answer_format}. '
             "Do not include any explanations or extra text. \n\n"
         )
-
         prompt = prefix + problem + "\n\n" + example["Explanation"]
     
     elif pm == "zs_causal":
@@ -289,11 +151,11 @@ def prepare_input(example, prompting_method, dataset_name):
         prefix = (
             "\nYou are an expert in causal reasoning. "
             'Given the following problem description, question, and the causal relationships related to this problem.'
-             f'Answer exactly in the JSON format: {answer_format}. '
+            f'Answer exactly in the JSON format: {answer_format}. '
             "Do not include any explanations or extra text. \n\n"
         )
         prompt = prefix  + problem  + '\n\n' + causal_map
-        
+    
         
     elif pm == "zs_causal_Inte":
         causal_map = example.get("causal_map_integration")
@@ -315,22 +177,13 @@ def prepare_input(example, prompting_method, dataset_name):
         )
         prompt = prefix + problem  + '\n\n' + causal_map
         
-    elif pm == "zs_causal_Inte_cot":
-        causal_map = example.get("causal_map_integration")
-        prefix = (
-            "\nYou are an expert in causal reasoning. "
-            'Given the following problem description, question, and the causal statements related to this problem.'
-            'Think step by step before answering. '
-            f'After reasoning, output your final answer in the JSON format: {answer_format}. \n\n'
-        )
-        prompt = prefix + problem  + '\n\n' + causal_map
     else:
         raise ValueError(f"Unsupported prompting method: {prompting_method}")
     
     return prompt
 
 
-def create_save_path(Results_ROOT, args):
+def create_save_path(Results_ROOT, model_name, args):
     generation_param = f"temperature{args.temperature}_max_new_tokens{args.max_new_tokens}"
     logging.info(
         "generation_param: %s",
@@ -340,7 +193,7 @@ def create_save_path(Results_ROOT, args):
         Results_ROOT
         / args.dataset_name
         / args.data_split
-        / args.data_model
+        / model_name
         / generation_param
     )
     if not os.path.exists(data_path):

@@ -52,10 +52,31 @@ Effect → Cause (with intervention)
 └── Data/                    # Local cache for downloaded datasets
 ```
 
+#### Create Causal Map
+Causal Math Reasoning:
+```
+python main.py --dataset_name causal_math --generate_map --integrate_map 
+```
+Causal Code Inference:
+```
+python main.py --dataset_name causal_code --generate_map --integrate_map 
+```
+#### Answer Generation
+Causal Math Reasoning:
+```
+python main.py --dataset_name causal_math --use_map --num_return_sequences 5
+```
+Causal Code Inference:
+```
+python main.py --dataset_name causal_code --use_map --num_return_sequences 5
+```
+
+#### Summarize Resultss
+Causal Math Reasoning:
 ```
 python analysis.py --dataset_name causal_math
 ```
-
+Causal Code Inference:
 ```
 python analysis.py --dataset_name causal_code
 ```
